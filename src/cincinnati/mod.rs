@@ -130,6 +130,28 @@ impl Cincinnati {
     }
 }
 
+// Evaluate and record whether booted OS is a dead-end release, and
+// log that information in motd file.
+fn refresh_deadend_status(node: &Node) {
+    match evaluate_deadend(node) {
+        Some(msg) => {
+            if let Err(e) = std::fs::write(
+                "/run/zincati/public/zincati.motd",
+                &format!("This release is a dead-end: {:?}", msg),
+            ) {
+                log::warn!("failed to write dead-end release information: {}", e);
+            };
+            BOOTED_DEADEND.set(1);
+        }
+        None => {
+            if let Err(e) = std::fs::remove_file("/run/motd.d/zincati.motd") {
+                log::warn!("failed to remove dead-end release info file: {}", e);
+            };
+            BOOTED_DEADEND.set(0);
+        }
+    };
+}
+
 /// Walk the graph, looking for an update reachable from the given digest.
 fn find_update(
     graph: client::Graph,
@@ -159,15 +181,7 @@ fn find_update(
     let cur_release = Release::from_cincinnati(cur_node.clone())
         .map_err(|e| CincinnatiError::FailedNodeParsing(e.to_string()))?;
 
-    // Evaluate and record whether booted OS is a dead-end release.
-    // TODO(lucab): consider exposing this information in more places
-    // (e.g. logs, motd, env/json file in a well-known location).
-    let is_deadend = match evaluate_deadend(&cur_node) {
-        Some(_) => 1,
-        None => 0,
-    };
-    BOOTED_DEADEND.set(is_deadend);
-
+    refresh_deadend_status(&cur_node);
     // Try to find all local deployments in the graph too.
     let local_releases = find_local_releases(&graph, local_depls);
 
